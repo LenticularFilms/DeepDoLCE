@@ -1,0 +1,10 @@
+numpy
+torch
+matplotlib
+argparse
+tqdm
+Pillow
+tensorboard
+torchvision
+scipy
+segmentation-models-pytorch
