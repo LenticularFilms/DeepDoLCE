@@ -244,7 +244,7 @@ class DevelopingSuite(object):
             
             x = sample["x"].unsqueeze(0)
 
-            y,z_rough,z,rgb_filter = self.colorize_image(x)
+            y,z_rough,z,rgb_filter,_ = self.colorize_image(x)
 
             rgb_filter_z = rgb_filter.cpu() + z.cpu()
             img = Image.fromarray((255*rgb_filter_z.squeeze().permute(1,2,0)).numpy().astype('uint8').squeeze(), 'RGB')
