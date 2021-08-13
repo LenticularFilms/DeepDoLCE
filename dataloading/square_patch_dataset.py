@@ -65,9 +65,9 @@ class MyDataset(torch.utils.data.Dataset):
         image = TF.crop(image, i, j, h, w)
         mask = TF.crop(mask, i, j, h, w)
 
-        rand_angle = self.max_roatation_deg * (2*np.random.rand() - 1)
-        image = TF.affine(image,rand_angle,translate=[0,0],scale=1.,shear=0.,resample=Image.BILINEAR)
-        mask = TF.affine(mask,rand_angle,translate=[0,0],scale=1.,shear=0.,resample=Image.BILINEAR)
+        rand_angle = self.max_roatation_deg * (2*torch.rand(size=(1,)).item() - 1)   
+        image = TF.affine(image,rand_angle,translate=[0,0],scale=1.,shear=0.,interpolation=TF.InterpolationMode.BILINEAR)
+        mask = TF.affine(mask,rand_angle,translate=[0,0],scale=1.,shear=0.,interpolation=TF.InterpolationMode.BILINEAR)
 
         image = TF.center_crop(image,(self.crop_2,self.crop_2))
         mask = TF.center_crop(mask,(self.crop_2,self.crop_2))
