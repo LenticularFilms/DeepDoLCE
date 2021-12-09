@@ -17,8 +17,6 @@ if 'ipykernel' in sys.modules:
 else:
     from tqdm import tqdm
 
-from models.color_restoration import ColorRestoration
-
 parser = argparse.ArgumentParser(description="training script")
 
 #### general parameters #####################################################
