@@ -5,7 +5,6 @@ import torch
 import torch.nn.functional as F
 from skimage import filters
 
-from others import *
 
 from models import get_model
 from torch.utils.tensorboard import SummaryWriter
@@ -18,7 +17,6 @@ if 'ipykernel' in sys.modules:
 else:
     from tqdm import tqdm
 
-#from models.lenticule_refinement import lenticuleRefinment
 from models.color_restoration import ColorRestoration
 
 parser = argparse.ArgumentParser(description="training script")
@@ -96,9 +94,7 @@ class DevelopingSuite(object):
         self.val_stats["optimization_loss"] = np.nan
 
         
-
     def train_and_eval(self):
-
 
         with tqdm(range(0,self.args.epochs),leave=True) as tnr:
             tnr.set_postfix(training_loss= np.nan, validation_loss= np.nan,best_validation_loss = np.nan)
@@ -237,85 +233,6 @@ class DevelopingSuite(object):
         return sampleout
 
 
-    def colorize_dataset(self,dataset_name="test"):
-
-        if not os.path.exists(os.path.join(self.experiment_folder,"lenticules/")):
-            os.mkdir(os.path.join(self.experiment_folder,"lenticules/"))
-        if not os.path.exists(os.path.join(self.experiment_folder,"color/")):
-            os.mkdir(os.path.join(self.experiment_folder,"color/"))
-        if not os.path.exists(os.path.join(self.experiment_folder,"rgb_filter/")):
-            os.mkdir(os.path.join(self.experiment_folder,"rgb_filter/"))
-
-        for sample in tqdm(self.dataloaders[dataset_name].dataset,leave=False):
-            
-            #x = sample["x"].unsqueeze(0)
-            #y,z_rough,z,rgb_filter,_ = self.colorize_image(x)
-
-            y,z,rgb_filter = self.colorize_image_bis(sample)
-
-            rgb_filter_z = rgb_filter.cpu() + z.cpu()
-            img = Image.fromarray((255*rgb_filter_z.squeeze().permute(1,2,0)).numpy().astype('uint8').squeeze(), 'RGB')
-            img.save(os.path.join(self.experiment_folder,"rgb_filter/","rgb_filter"+sample["name"]))
-
-            img = Image.fromarray((255*z).cpu().numpy().astype('uint8').squeeze(), 'L')
-            img.save(os.path.join(self.experiment_folder,"lenticules/","lenticules_"+sample["name"]))
-
-            img = Image.fromarray((255*y.squeeze().permute(1,2,0)).cpu().numpy().astype('uint8').squeeze(), 'RGB')
-            img.save(os.path.join(self.experiment_folder,"color/","color"+sample["name"]))
-
-    def colorize_image(self,x):
-        assert(1==0)
-        while len(x.shape) < 4:
-            x = x.unsqueeze(0)
-
-        return_device = x.device
-
-        x = x.to(self.device)
-
-        z_rough = self.process_image(x)
-
-        lenticules_dict,objective_refinement = lenticuleRefinment(z_rough,device=self.device,)
-            
-        colorize = ColorRestoration(lenticules_dict["w"]).to(self.device)
-
-        out_dict = colorize(x,lenticules_dict["z"])
-        y = out_dict["y"]
-        rgb_filter = out_dict["rgb_filter_image"]
-
-        return (y.detach().to(return_device),
-               z_rough.detach().to(return_device),
-               lenticules_dict["z"].detach().to(return_device),
-               rgb_filter.detach().to(return_device),
-               objective_refinement)
-
-    def colorize_image_bis(self,sample):
-
-        return_device = sample["x"].device
-
-        if self.args.preprocess == "network":
-            sample = self.to_device(sample)
-            x_p =  1 - self.process_image(sample["x"].unsqueeze(0))
-            x_p = x_p.squeeze(0).detach()
-        elif self.args.preprocess == "meijering":
-            x_p = sample["x"].cpu().detach().numpy().squeeze()
-            x_p = 1 - filters.meijering(x_p,black_ridges=True,sigmas=np.linspace(0.1,1,10))
-            x_p = torch.from_numpy(x_p).float()
-        elif self.args.preprocess == "no":
-            x_p = sample["x"].squeeze(0).detach()
-        else:
-            raise NotImplementedError
-            
-        out_dict,z = colorize_image(sample["x"],x_p)
-
-        y = out_dict["y"]
-        rgb_filter = out_dict["rgb_filter_image"]
-
-        return (y.detach().to(return_device),
-               z.detach().to(return_device),
-               rgb_filter.detach().to(return_device),
-               )
-
-
     def process_image(self,x):
 
         delta = 8
@@ -353,9 +270,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     developingSuite = DevelopingSuite(args)
 
-    developingSuite.colorize_dataset()
+    developingSuite.train_and_eval()
 
     developingSuite.writer.close()
 
-#python3 developing_suite.py --model=DeeperUNet --save-dir=./results/ --save-model=best --mode=only_train --workers=12 --data=slice_dolce --dataroot=/scratch2/deepdoLCE_dataset --epochs=20 --logstep-train=20 --batch-size=16 --train-val-ratio=0.9 --optimizer=sgd --lr=0.01 --momentum=0.99 --lr-scheduler=smart --lr-step=3 --lr-gamma=0.1
 

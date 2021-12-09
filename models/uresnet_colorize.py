@@ -15,6 +15,7 @@ class BinaryResnet(nn.Module):
     def forward(self, input):
         return torch.sigmoid(self.net(input))
 
+
 class UResNet(nn.Module):
 
     def __init__(self, args, data_stats):
@@ -25,7 +26,7 @@ class UResNet(nn.Module):
         output_channels = 3 * 6 #data_stats["output_channels"]
         
         self.model = smp.Unet('resnet50', classes=output_channels,in_channels=input_channels, activation=None,encoder_weights="imagenet")
-        
+    
 
     def forward(self, input):
 
@@ -91,6 +92,7 @@ class Adversarialmodel(nn.Module):
 
         self.adversarial_loss = torch.nn.BCELoss()
 
+
     def forward(self, input, optimizer=None):
         
         x = input["x"]
@@ -119,20 +121,20 @@ class Adversarialmodel(nn.Module):
                 if param.grad is not None:
                     param.grad.fill_(0.)
 
-                    
         if "y" in input:
             noise = 0.001 * torch.randn_like(y)
             disc_target = self.discriminator(y+noise)
             real_loss = self.adversarial_loss(disc_target,0.95 *  valid)
+        
+            noise = 0.001 * torch.randn_like(y_demosaic)
+            disc_demosaic = self.discriminator(y_demosaic.detach()+noise) #(noise + x_mod).detach())
+            fake_loss = self.adversarial_loss(disc_demosaic,0.05 + fake)
+            d_loss = 0.5 * (real_loss + fake_loss)
         else:
             disc_target = None
             real_loss = 0
-
-        noise = 0.001 * torch.randn_like(y_demosaic)
-        disc_demosaic = self.discriminator(y_demosaic.detach()+noise) #(noise + x_mod).detach())
-        fake_loss = self.adversarial_loss(disc_demosaic,0.05 + fake)
-
-        d_loss = 0.5 * (real_loss + fake_loss)
+            d_loss = 0
+            disc_demosaic = 0
 
         return {"y_pred":y_demosaic,
                 "g_loss": g_loss,
@@ -141,14 +143,12 @@ class Adversarialmodel(nn.Module):
                 "disc_target": disc_target,
                 "disc_demosaic": disc_demosaic}
 
+
     def get_loss(self, sample, output):
 
         d_loss = output["d_loss"]
         g_loss = output["g_loss"]
         l1_loss = output["l1_loss"]
-
-
-
 
         return  d_loss, { "optimization_loss": d_loss.detach().item(),
                           "discriminator_loss": d_loss.detach().item(),

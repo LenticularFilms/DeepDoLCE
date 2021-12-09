@@ -1,9 +1,7 @@
 import numpy as np
 import torch
 from torchvision import transforms
-import torch.nn.functional as F
 import torch.utils.data as torchdata
-import scipy.stats as st
 import json
 from PIL import Image
 import os
@@ -29,11 +27,9 @@ def load_full_image_dataset(args,data_stats=None):
         with open(os.path.join(args.datafolder,'test_images_list.json')) as json_file:
             test_images_list = json.load(json_file)   
         
-        #with open(os.path.join(args.datafolder,"fail_images_list.json")) as json_file:
-        #    test_images_list = json.load(json_file)   
 
     dataloaders = {}
-    if "train" in args.mode: # == "only_train":
+    if "train" in args.mode:
         val_set = MyDataset(val_images_list,data_stats,args)
         train_set = MyDataset(train_images_list,data_stats,args) 
 
@@ -58,17 +54,11 @@ class MyDataset(torch.utils.data.Dataset):
 
         self.data_stats = data_stats.copy()
 
-        #self.idx = -1
 
     def __getitem__(self, idx):
         
         if torch.is_tensor(idx):
             idx = idx.tolist()
-
-        #self.idx += 1
-        #while "Nazi" not in self.images_list[self.idx]:
-        #    self.idx = self.idx + 1
-        #idx = self.idx
         
         input_image_full = os.path.join(self.datafolder, 'inputgrayIMGs',self.images_list[idx])
 

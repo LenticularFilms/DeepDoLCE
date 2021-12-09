@@ -6,22 +6,22 @@ import torch.nn.functional as F
 from skimage import filters
 from skimage.morphology import disk
 
-from others import *
-
-from models import get_model
-from utils.other import new_log
-from dataloading import get_dataloaders
-from dataloading.genome_dataset import get_interpolation_sets_extended
-from utils.plot_utils import *
-
 if 'ipykernel' in sys.modules:
     from tqdm import tqdm_notebook as tqdm
 else:
     from tqdm import tqdm
 
-from models.color_restoration import ColorRestoration
 
-parser = argparse.ArgumentParser(description="training script")
+from models import get_model
+from utils.other import new_log
+from dataloading import get_dataloaders
+from dataloading.destriping_dataset import get_interpolation_sets_extended
+from utils.plot_utils import *
+from models.color_restoration import ColorRestoration
+from models.interpolate_stripes import interpolateStripes
+from models.lenticules_vectorization import *
+
+parser = argparse.ArgumentParser(description="colorizing script")
 
 #### general parameters #####################################################
 parser.add_argument('--tag', default="__",type=str)
@@ -42,8 +42,10 @@ parser.add_argument("--model",type=str,help="model to run for lenticules detecti
 parser.add_argument("--model_2",type=str,default=None,help="model to run for colorization")
 parser.add_argument('--resume', type=str, default=None,help='path to resume the model if needed')
 parser.add_argument('--resume_2', type=str, default=None,help='path to resume the model if needed')
-parser.add_argument("--style",type=str,default="new",choices=["new","old_dolce","interp"],help="type of colorization")
-parser.add_argument("--order",type=str,default="nearest",choices=["nearest","linear","cubic"],help="type of interpolation")
+parser.add_argument("--style",type=str,default="new_dolce",choices=["new_dolce","old_dolce","interpolate"],help="type of colorization")
+parser.add_argument("--order",type=str,default="nope",choices=["nearest","linear","cubic","nope"],help="type of interpolation")
+parser.add_argument("--lambda1", type=float, default=1.,help="width variation regularization")
+parser.add_argument("--lambda2", type=float, default=10.,help="width absolute value regularization")
 
 class ColorizeSuite(object):
 
@@ -106,24 +108,28 @@ class ColorizeSuite(object):
             os.mkdir(os.path.join(self.experiment_folder,"lenticules/"))
         if not os.path.exists(os.path.join(self.experiment_folder,"color/")):
             os.mkdir(os.path.join(self.experiment_folder,"color/"))
-        if not os.path.exists(os.path.join(self.experiment_folder,"rgb_filter/")):
-            os.mkdir(os.path.join(self.experiment_folder,"rgb_filter/"))
+        if not os.path.exists(os.path.join(self.experiment_folder,"lenticules_combo/")):
+            os.mkdir(os.path.join(self.experiment_folder,"lenticules_combo/"))
 
         for sample in tqdm(self.dataloaders[dataset_name].dataset,leave=False):
             
-            x = sample["x"].unsqueeze(0)
+            x = sample["x"]
+            
+            y,z,z_rough,_,_,_,_ = self.colorize_image(x)
 
-            y,z,_,_,_,_,_ = self.colorize_image(x)
-
-            #rgb_filter_z = rgb_filter.cpu() + z.cpu()
-            #img = Image.fromarray((255*rgb_filter_z.squeeze().permute(1,2,0)).numpy().astype('uint8').squeeze(), 'RGB')
-            #img.save(os.path.join(self.experiment_folder,"rgb_filter/","rgb_filter"+sample["name"]))
+            combo_z = torch.zeros((3,z.shape[-2],z.shape[-1]))
+            combo_z[0:1,:,:] = z_rough
+            combo_z[1:2,:,:] = z
 
             img = Image.fromarray((255*z).cpu().numpy().astype('uint8').squeeze(), 'L')
             img.save(os.path.join(self.experiment_folder,"lenticules/","lenticules_"+sample["name"]))
 
-            img = Image.fromarray((255*y.squeeze().permute(1,2,0)).cpu().numpy().astype('uint8').squeeze(), 'RGB')
+            img = Image.fromarray((255*combo_z).squeeze().permute(1,2,0).cpu().numpy().astype('uint8').squeeze(), 'RGB')
+            img.save(os.path.join(self.experiment_folder,"lenticules_combo/","lenticules_combo_"+sample["name"]))
+
+            img = Image.fromarray((255*y).squeeze().permute(1,2,0).cpu().numpy().astype('uint8'), 'RGB')
             img.save(os.path.join(self.experiment_folder,"color/","color"+sample["name"]))
+
 
     def colorize_image(self,x):
 
@@ -135,42 +141,35 @@ class ColorizeSuite(object):
         x = x.to(self.device)
 
         z = self.process_image_lenticules(x)
-
-        #else:
-        #    x_np = x.cpu().numpy().squeeze()
-        #    #z = filters.sato(x_np,black_ridges=True) 
-        #    z = filters.meijering(x_np,black_ridges=True,sigmas=np.linspace(0.1,1,10)) #sigmas=[0.1,0.5,1,2,4]) #
-        #    z = torch.from_numpy(z).unsqueeze(0).unsqueeze(0).float().to(self.device)
         
-        #style = "new"
-        if self.args.style == "old_dolce": #old style
+        if self.args.style == "old_dolce": #old style -> same color throughout a single lenticule
             _, Pxx_den = sg.periodogram(np.sum(z.cpu().numpy().squeeze(),axis=0))
             w = z.squeeze().shape[1] / ( 50 + np.argmax(Pxx_den[50:350]))
 
-            delta_max = 19
+            delta_max = 18
             min_lenticule_width = int(np.floor(w)-1)
             max_lenticule_width = int(np.ceil(w)+1)
             u = build_score_matrix(1-z.cpu().numpy().squeeze(),delta_max)
 
-            bottom,top  = optimize_locations(u,delta_max,min_lenticule_width,max_lenticule_width,w,10.)#alpha=0.1)
+            bottom,top  = optimize_locations(u,delta_max,min_lenticule_width,max_lenticule_width,w,lambda1=self.args.lambda1,lambda2=self.args.lambda2)
 
             z_raster = reconstruct_boundaries(bottom,top,size=x.squeeze().shape,lenticule_min = min_lenticule_width,lenticule_max = max_lenticule_width)
-
             z_raster = torch.from_numpy(z_raster).unsqueeze(0).unsqueeze(0).float().to(self.device)
-            #z_raster = z
-            x_mosaic,_,_,_ = self.extract_mosaic(z,x)
+            x_stripe,_,_,_ = self.extract_stripes(z,x)
 
             colorize = ColorRestoration(max_lenticule_width).to(self.device)
             out_dict = colorize(x,z_raster)
             
             y = out_dict["y"].squeeze()#.detach().cpu()
-        elif self.args.style == "new":
-            x_mosaic,z_raster,bottom,top = self.extract_mosaic(z,x)
-            y = self.demosaicing(x_mosaic)
-        elif self.args.style == "interp":
-            x_mosaic,z_raster,bottom,top = self.extract_mosaic(z,x)
-            y = torch.from_numpy(nearest_interp(x_mosaic.cpu().numpy().squeeze(),order=self.args.order)).float()
-
+        elif self.args.style == "new_dolce": # -> learned destriping
+            x_stripe,z_raster,bottom,top = self.extract_stripes(z,x)
+            y = self.destriping(x_stripe) # -> interpolation destriping
+        elif self.args.style == "interpolate":
+            x_stripe,z_raster,bottom,top = self.extract_stripes(z,x)
+            y = torch.from_numpy(interpolateStripes(x_stripe.cpu().numpy().squeeze(),order=self.args.order)).float()
+        else:
+            raise NotImplementedError
+        
         gain_matrix = torch.tensor([[0.789,0.154,0.057],
                                     [-0.286,1.195,0.060],
                                     [-0.049,0.035,1.035]])
@@ -180,8 +179,8 @@ class ColorizeSuite(object):
         
         return (y.detach().to(return_device),
                 z_raster.detach().to(return_device),
-                z.detach().to(return_device),
-                x_mosaic.detach().to(return_device),
+                z.detach().to(return_device).squeeze(0),
+                x_stripe.detach().to(return_device),
                 bottom,top,y_orig.detach().to(return_device),
                )
 
@@ -220,32 +219,24 @@ class ColorizeSuite(object):
 
         return y.to(x.device).detach()
 
-    def extract_mosaic(self,z,x):
+    def extract_stripes(self,z,x):
 
         _, Pxx_den = sg.periodogram(np.sum(z.cpu().numpy().squeeze(),axis=0))
         w = z.squeeze().shape[1] / ( 50 + np.argmax(Pxx_den[50:350]))
 
-        delta_max = 16
+        delta_max = 18
         min_lenticule_width = int(np.floor(w)-1)
         max_lenticule_width = int(np.ceil(w)+1)
         u = build_score_matrix(1-z.cpu().numpy().squeeze(),delta_max)
 
-        lenticules_location_bottom,lenticules_location_top  = optimize_locations(u,delta_max,min_lenticule_width,max_lenticule_width,w,10.) #10.)#alpha=0.1)
+        lenticules_location_bottom,lenticules_location_top  = optimize_locations(u,delta_max,min_lenticule_width,max_lenticule_width,w,lambda1=self.args.lambda1,lambda2=self.args.lambda2) 
 
         z_raster = reconstruct_boundaries(lenticules_location_bottom,lenticules_location_top,size=x.squeeze().shape,lenticule_min = min_lenticule_width,lenticule_max = max_lenticule_width)
 
         z_raster = torch.from_numpy(z_raster).unsqueeze(0).unsqueeze(0).float().to(self.device)
         x = x.to(self.device)
-        #colorize = ColorRestoration(max_lenticule_width).to(self.device)
-        #_ = colorize(x,z)
-        
-        #idx_color = [w/4,w/2,3*w/4]
         
         idx_color = [5.*w/19.,9.*w/19.,14.*w/19.]
-
-        
-        #idx_color = [colorize.RGB_extractor.idx[0].item(),colorize.RGB_extractor.idx[1].item(),colorize.RGB_extractor.idx[2].item()]
-
 
         x_np = x.cpu().numpy().squeeze()
         H,W = x_np.shape
@@ -258,9 +249,8 @@ class ColorizeSuite(object):
         if lenticules_location_top[-1] > W or lenticules_location_bottom[-1] > W:
             last = len(lenticules_location_top) - 1
             
-        x_mosaic = np.zeros((3,H,3*(last-first-1)))
+        x_stripe = np.zeros((3,H,3*(last-first-1)))
     
-            
         for c in range(0,3):
             for n,bottom,top in zip(range(len(lenticules_location_top[first:last-1])),lenticules_location_bottom[first:last-1],lenticules_location_top[first:last-1]):
 
@@ -283,26 +273,23 @@ class ColorizeSuite(object):
         
                 extr_col = weight_pre * x_np[idx_row,idx_col_pre] + weight_post * x_np[idx_row,idx_col_post]
                 extr_col_den = filters.median(extr_col[:,None],disk(6))
-                x_mosaic[c,:,3*n+c] = torch.from_numpy(extr_col_den.squeeze()) #x_filter[idx_row,idx_col]
+                x_stripe[c,:,3*n+c] = torch.from_numpy(extr_col_den.squeeze()) #x_filter[idx_row,idx_col]
 
-        x_mosaic = torch.from_numpy(x_mosaic).float().unsqueeze(0)
-        #print(x_mosaic.shape)
+        x_stripe = torch.from_numpy(x_stripe).float().unsqueeze(0)
 
-        x_mosaic = F.interpolate(x_mosaic,None,scale_factor=(3/w,1),recompute_scale_factor=True) #,mode=F.bilinear)
-        #print(x_mosaic.shape)
-        #print("end")
+        x_stripe = F.interpolate(x_stripe,None,scale_factor=(3/w,1),recompute_scale_factor=True) #,mode=F.bilinear)
 
-        return x_mosaic,z_raster.squeeze(0),lenticules_location_bottom,lenticules_location_top 
+        return x_stripe,z_raster.squeeze(0),lenticules_location_bottom,lenticules_location_top 
     
 
-    def demosaicing(self,x_mosaic):
+    def destriping(self,x_stripe):
 
         network_input_size = 256
 
-        B,C,H,W = x_mosaic.shape
+        B,C,H,W = x_stripe.shape
 
-        H_large,W_large = (H//256 +1)*256, (W//256 +1)*256
-        x_padded = F.pad(x_mosaic,(0,W_large-W,0,H_large-H,))
+        H_large,W_large = (H//network_input_size +1)*network_input_size, (W//network_input_size +1)*network_input_size
+        x_padded = F.pad(x_stripe,(0,W_large-W,0,H_large-H,))
         
         u_dict = get_interpolation_sets_extended(x_padded.squeeze())
         u_dict["u_r"] = u_dict["u_r"].unsqueeze(0).to(self.device)
@@ -330,7 +317,4 @@ if __name__ == '__main__':
     developingSuite = ColorizeSuite(args)
 
     developingSuite.colorize_dataset()
-
-
-# python3 developing_suite.py --model=DeeperUNet --save-dir=./results/ --save-model=best --mode=only_train --workers=12 --data=slice_dolce --dataroot=/scratch2/deepdoLCE_dataset --epochs=20 --logstep-train=20 --batch-size=16 --train-val-ratio=0.9 --optimizer=sgd --lr=0.01 --momentum=0.99 --lr-scheduler=smart --lr-step=3 --lr-gamma=0.1
 

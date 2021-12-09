@@ -1,12 +1,10 @@
 import numpy as np
 import torch
 from torchvision import transforms
-import torch.nn.functional as F
 import torch.utils.data as torchdata
 import json
 from PIL import Image
 import os
-import random
 import torchvision.transforms.functional as TF
 
 def load_square_patch_dataset(args):
