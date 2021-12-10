@@ -107,7 +107,7 @@ class RGBExtractor_fixed(nn.Module):
     def get_RGB_filter(self):
         return self.RGB
 
-    def autotune(self,x,z):
+    def autotune(self,x,z,idx=None):
 
         diff_filter = torch.zeros((1,1,1,3))
         diff_filter[...,0] = -1
@@ -126,6 +126,17 @@ class RGBExtractor_fixed(nn.Module):
         idx_green = (idx_first + idx_last) / 2 #self.w/2  #
         idx_red = (idx_first + idx_green) / 2 #self.w/3  #
         idx_blue = (idx_last + idx_green) / 2 #2*self.w/3 #
+
+        idx_red = 5.*self.w/19.
+        idx_green = 9.*self.w/19.
+        idx_blue = 14.*self.w/19.
+        
+        if idx is not None:
+            idx_green = idx[1]
+            idx_red = idx[0]
+            idx_blue = idx[2]
+
+        self.idx = [idx_red,idx_green,idx_blue]
 
         with torch.no_grad():
             self.RGB.fill_(0.) # = 0 * self.RGB
@@ -186,6 +197,30 @@ class LenticuleSpreader(nn.Module):
 
         return y
 
+class HRLenticuleSpreader(nn.Module):
+
+    def __init__(self,w_ceil:int):
+        super(HRLenticuleSpreader, self).__init__()
+
+        self.w_ceil = w_ceil
+
+        spreader_filter = torch.zeros(1,3,1,self.w_ceil)
+        spreader_filter[0,2,:,0:w_ceil//3] = 1
+        spreader_filter[0,1,:,w_ceil//3:2*w_ceil//3] = 1
+        spreader_filter[0,0,:,2*w_ceil//3:] = 1
+        self.spreader_filter = nn.Parameter(spreader_filter,requires_grad=False)
+
+    def forward(self,x):
+
+        if x.shape[1] == 3:
+            y = torch.conv2d(x,self.spreader_filter,padding=(0,self.w_ceil-1))[:,:,:,0:x.shape[3]]
+        elif x.shape[1] == 1:
+            y = torch.conv2d(x,self.spreader_filter[0:1,0:1,:,:],padding=(0,self.w_ceil-1))[:,:,:,0:x.shape[3]]
+        else:
+            raise NotImplementedError
+
+        return y
+
 
 class ColorRestoration(nn.Module):
 
@@ -205,24 +240,28 @@ class ColorRestoration(nn.Module):
             self.RGB_extractor = RGBExtractor_fixed(self.w_ceil,self.w)
         
         self.spreader = LenticuleSpreader(self.w_ceil)
+        #self.HRspreader = HRLenticuleSpreader(self.w_ceil)
 
     
-    def forward(self,x,z):
+    def forward(self,x,z,idx=None):
 
         x_exp = self.space2Feature(x,z)
 
         if self.autotune and not self.learnable:
-            self.RGB_extractor.autotune(x,z)
+            self.RGB_extractor.autotune(x,z,idx)
 
         x_RGB,rgb_filter_image = self.RGB_extractor(x_exp,z)
 
         y_unorm = self.spreader(x_RGB)
+        #y_unorm_HR = self.HRspreader(x_RGB)
 
         z_norm = self.spreader(z)
-        
-        y = y_unorm / z_norm
+        z_norm = self.spreader(z)
 
-        return {"y": y, "rgb_filter_image": rgb_filter_image} 
+        y = y_unorm / z_norm
+        #y_HR = y_unorm_HR / z_norm
+
+        return {"y": y, "rgb_filter_image": rgb_filter_image}  # "y_HR": y_HR,
 
 
 

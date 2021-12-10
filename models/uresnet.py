@@ -13,7 +13,7 @@ class UResNet(nn.Module):
         input_channels = data_stats["input_channels"]
         output_channels = data_stats["output_channels"]
         
-        self.model = smp.Unet('resnet34', classes=output_channels,in_channels=input_channels, activation=None,encoder_weights="imagenet")
+        self.model = smp.Unet('resnet50', classes=output_channels,in_channels=input_channels, activation=None,encoder_weights="imagenet")
         
     """
     def _make_layer(self, block, planes, blocks, stride=1, dilation=1, BatchNorm=None):
@@ -72,7 +72,8 @@ class UResNet(nn.Module):
         criterion_std = torch.nn.BCEWithLogitsLoss()
         std_loss = criterion_std(output["y_pred"].detach(), sample["y"]).detach()
 
-        return loss,std_loss
+        return loss, { "optimization_loss": loss.detach().item(),
+                        "std_loss": std_loss.detach().item()}
 
 def weight_cross_entropy_loss(target):
     # Calculate sum of weighted cross entropy loss.

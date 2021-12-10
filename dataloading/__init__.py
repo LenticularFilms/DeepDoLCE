@@ -1,13 +1,13 @@
-from dataloading.square_patch_dataset import load_square_patch_dataset
-from dataloading.full_image_dataset import load_full_image_dataset
+from .lenticular_square_patch_dataset import load_square_patch_dataset
+from .lenticular_full_image_dataset import load_full_image_dataset
+from .destriping_dataset import load_destriping_dataset
 
 def get_dataloaders(args):
-
-    if args.data == "square_patch":
+    if args.data == "lenticular_square_patch":
         return load_square_patch_dataset(args)
-    if args.data == "full_image":
+    if args.data == "lenticular_full_image":
         return load_full_image_dataset(args)
-    #if args.data == "slice_dolce":
-    #    return load_slice_dolce_dataset(args)
+    if args.data == "destriping":
+        return load_destriping_dataset(args)
     else:
         raise NotImplementedError

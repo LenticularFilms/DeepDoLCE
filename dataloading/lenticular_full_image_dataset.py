@@ -1,9 +1,7 @@
 import numpy as np
 import torch
 from torchvision import transforms
-import torch.nn.functional as F
 import torch.utils.data as torchdata
-import scipy.stats as st
 import json
 from PIL import Image
 import os
@@ -28,16 +26,16 @@ def load_full_image_dataset(args,data_stats=None):
     if "test" in args.mode:
         with open(os.path.join(args.datafolder,'test_images_list.json')) as json_file:
             test_images_list = json.load(json_file)   
-        #with open('data/fail_images_list.json') as json_file:
-        #    test_images_list = json.load(json_file)   
+        
 
     dataloaders = {}
-    if "train" in args.mode: # == "only_train":
+    if "train" in args.mode:
         val_set = MyDataset(val_images_list,data_stats,args)
         train_set = MyDataset(train_images_list,data_stats,args) 
 
         dataloaders["train"] = torchdata.DataLoader(train_set, batch_size=args.batch_size,num_workers=args.workers,shuffle=True,pin_memory=True,drop_last=True)
-        dataloaders["val"] = val_loader = torchdata.DataLoader(val_set, batch_size=args.batch_size,num_workers=args.workers,shuffle=False,pin_memory=True,drop_last=True)
+        if len(val_images_list) > 0:
+            dataloaders["val"]  = torchdata.DataLoader(val_set, batch_size=args.batch_size,num_workers=args.workers,shuffle=False,pin_memory=True,drop_last=True)
 
     if "test" in args.mode:
         test_set = MyDataset(test_images_list,data_stats,args)
@@ -56,23 +54,43 @@ class MyDataset(torch.utils.data.Dataset):
 
         self.data_stats = data_stats.copy()
 
+
     def __getitem__(self, idx):
         
         if torch.is_tensor(idx):
             idx = idx.tolist()
         
         input_image_full = os.path.join(self.datafolder, 'inputgrayIMGs',self.images_list[idx])
-        label_image_full = os.path.join(self.datafolder, 'truthIMGs',"debugImage_"+self.images_list[idx][0:-4]+"_truth.png")
+
+        label_image_full = None
+        if os.path.isdir(os.path.join(self.datafolder, 'truthIMGs')):
+            label_image_full = os.path.join(self.datafolder, 'truthIMGs',"debugImage_"+self.images_list[idx][0:-4]+"_truth.png")
 
         x = Image.open(input_image_full)
-        y = Image.open(label_image_full)
+        if label_image_full is not None:
+            y = Image.open(label_image_full)
+        #x = np.array(x)
+
+        if np.max(x) > 255:
+            x = np.array(x)
+            x = x / (256*256 - 1)
+            x = x.astype(float)
 
         x = self.transforms(x)
-        y = self.transforms(y)
+        if label_image_full is not None:
+            y = self.transforms(y)
+        else:
+            y = 0. * x
 
         if self.args.normalize_patch:
             x = x - torch.mean(x)
             x = x / torch.std(x)
+
+        #print(self.images_list[idx])
+        #print(idx)
+
+        x = x.float()
+        y = y.float()
 
         return { "x":x, "y":y, "name": self.images_list[idx]}
     
