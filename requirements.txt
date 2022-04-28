@@ -8,3 +8,4 @@ tensorboard
 torchvision
 scipy
 segmentation-models-pytorch
+joblib

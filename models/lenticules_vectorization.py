@@ -2,6 +2,11 @@ import numpy as np
 import scipy
 import scipy.optimize as opt
 import scipy.signal as sg
+import time
+from joblib import Parallel, delayed
+
+#from torch import float32
+#from numba import jit
 
 
 def build_score_matrix(x,delta_max):
@@ -9,8 +14,9 @@ def build_score_matrix(x,delta_max):
     H,W = x.shape
     y = np.zeros((2*delta_max + 1,W))
 
-    for c in range(0,W):
-        for delta in range(-delta_max,delta_max+1):
+    def p(delta):
+        r = np.zeros((W,))
+        for c in range(0,W):
 
             idx_row = np.arange(0,H)
             idx_col = np.round(c + idx_row * (delta/H)).astype(int)
@@ -22,7 +28,13 @@ def build_score_matrix(x,delta_max):
 
             val = x[idx_row,idx_col]
             val = np.mean(val)
-            y[delta+delta_max,c] = val
+            #y[delta+delta_max,c] = val
+            r[c] = val
+        return r
+
+    #for delta in range(-delta_max,delta_max+1):
+    
+    y = np.array(Parallel(n_jobs=8)(delayed(p)(delta) for delta in range(-delta_max,delta_max+1)))
 
     return y
 
@@ -84,8 +96,11 @@ def my_find_min(y,delta_max,min_lenticule_width,max_lenticule_width,w):
 
 def optimize_locations(y,delta_max,min_lenticule_width,max_lenticule_width,w,lambda1,lambda2):
 
+    t_0 = time.time()
     initial_bottom,initial_top,init_delta  = my_find_min(y,delta_max,min_lenticule_width,max_lenticule_width,w)
     M = len(initial_bottom) - 1
+    #print("initialization top/bottom: {}".format(time.time()-t_0))    
+
     
     x0 = np.concatenate([initial_bottom[1:],initial_top[1:]],axis=0)
     f = scipy.interpolate.RectBivariateSpline(np.arange(0,y.shape[0])-delta_max, np.arange(0,y.shape[1]),y)
@@ -146,7 +161,7 @@ def optimize_locations(y,delta_max,min_lenticule_width,max_lenticule_width,w,lam
     #print(res.message)
 
     x = res.x
-
+    
     bottom = initial_bottom.astype(float)
     bottom[1:] = x[0:M]
     top = initial_top.astype(float)

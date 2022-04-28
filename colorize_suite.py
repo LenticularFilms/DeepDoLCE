@@ -1,4 +1,4 @@
-import sys, argparse, os
+import sys, argparse, os, time
 import numpy as np
 
 import torch
@@ -28,6 +28,8 @@ parser.add_argument('--tag', default="__",type=str)
 parser.add_argument("--device",default="cuda",type=str,choices=["cuda", "cpu"])
 parser.add_argument("--save-dir",help="Path to directory where models and logs should be saved saved")
 parser.add_argument('--mode',default="only_train",type=str,choices=["None","train","test","train_and_test"],help="mode to be run")
+parser.add_argument("--save-only-color",action='store_true',default=False,help="avoids non useful calculation if only interested in obtaining the colored output")
+
 
 #### data parameters ##########################################################
 parser.add_argument("--data",default="full_image",type=str,help="dataset selection")
@@ -117,15 +119,16 @@ class ColorizeSuite(object):
             
             y,z,z_rough,_,_,_,_ = self.colorize_image(x)
 
-            combo_z = torch.zeros((3,z.shape[-2],z.shape[-1]))
-            combo_z[0:1,:,:] = z_rough
-            combo_z[1:2,:,:] = z
+            if not self.args.save_only_color:
+                combo_z = torch.zeros((3,z.shape[-2],z.shape[-1]))
+                combo_z[0:1,:,:] = z_rough
+                combo_z[1:2,:,:] = z
 
-            img = Image.fromarray((255*z).cpu().numpy().astype('uint8').squeeze(), 'L')
-            img.save(os.path.join(self.experiment_folder,"lenticules/","lenticules_"+sample["name"]))
+                img = Image.fromarray((255*z).cpu().numpy().astype('uint8').squeeze(), 'L')
+                img.save(os.path.join(self.experiment_folder,"lenticules/","lenticules_"+sample["name"]))
 
-            img = Image.fromarray((255*combo_z).squeeze().permute(1,2,0).cpu().numpy().astype('uint8').squeeze(), 'RGB')
-            img.save(os.path.join(self.experiment_folder,"lenticules_combo/","lenticules_combo_"+sample["name"]))
+                img = Image.fromarray((255*combo_z).squeeze().permute(1,2,0).cpu().numpy().astype('uint8').squeeze(), 'RGB')
+                img.save(os.path.join(self.experiment_folder,"lenticules_combo/","lenticules_combo_"+sample["name"]))
 
             img = Image.fromarray((255*y).squeeze().permute(1,2,0).cpu().numpy().astype('uint8'), 'RGB')
             img.save(os.path.join(self.experiment_folder,"color/","color"+sample["name"]))
@@ -139,9 +142,10 @@ class ColorizeSuite(object):
         return_device = x.device
 
         x = x.to(self.device)
-
+        t_0 = time.time()
         z = self.process_image_lenticules(x)
-        
+        #print("raster prediction: {}".format(time.time()-t_0))
+        #t_0 = time.time()
         if self.args.style == "old_dolce": #old style -> same color throughout a single lenticule
             _, Pxx_den = sg.periodogram(np.sum(z.cpu().numpy().squeeze(),axis=0))
             w = z.squeeze().shape[1] / ( 50 + np.argmax(Pxx_den[50:350]))
@@ -160,10 +164,18 @@ class ColorizeSuite(object):
             colorize = ColorRestoration(max_lenticule_width).to(self.device)
             out_dict = colorize(x,z_raster)
             
+            if self.args.save_only_color:
+                z_raster = None
+
             y = out_dict["y"].squeeze()#.detach().cpu()
         elif self.args.style == "new_dolce": # -> learned destriping
+            t_0 = time.time()
             x_stripe,z_raster,bottom,top = self.extract_stripes(z,x)
+            #print("vectorization: {}".format(time.time()-t_0))
+            #t_0 = time.time()
             y = self.destriping(x_stripe) # -> interpolation destriping
+            #print("destriping: {}".format(time.time()-t_0))
+            #t_0 = time.time()
         elif self.args.style == "interpolate":
             x_stripe,z_raster,bottom,top = self.extract_stripes(z,x)
             y = torch.from_numpy(interpolateStripes(x_stripe.cpu().numpy().squeeze(),order=self.args.order)).float()
@@ -178,7 +190,7 @@ class ColorizeSuite(object):
         y = torch.clamp(torch.sum(y.unsqueeze(0)*gain_matrix,1),0,1)
         
         return (y.detach().to(return_device),
-                z_raster.detach().to(return_device),
+                None if z_raster is None else z_raster.detach().to(return_device),
                 z.detach().to(return_device).squeeze(0),
                 x_stripe.detach().to(return_device),
                 bottom,top,y_orig.detach().to(return_device),
@@ -220,20 +232,33 @@ class ColorizeSuite(object):
         return y.to(x.device).detach()
 
     def extract_stripes(self,z,x):
-
+        
+        t_0 = time.time()
         _, Pxx_den = sg.periodogram(np.sum(z.cpu().numpy().squeeze(),axis=0))
         w = z.squeeze().shape[1] / ( 50 + np.argmax(Pxx_den[50:350]))
+        #print("period ex: {}".format(time.time()-t_0))
+        #t_0 = time.time()
 
         delta_max = 18
         min_lenticule_width = int(np.floor(w)-1)
         max_lenticule_width = int(np.ceil(w)+1)
         u = build_score_matrix(1-z.cpu().numpy().squeeze(),delta_max)
+        #print("build score matrix: {}".format(time.time()-t_0))
+        #t_0 = time.time()
 
         lenticules_location_bottom,lenticules_location_top  = optimize_locations(u,delta_max,min_lenticule_width,max_lenticule_width,w,lambda1=self.args.lambda1,lambda2=self.args.lambda2) 
 
-        z_raster = reconstruct_boundaries(lenticules_location_bottom,lenticules_location_top,size=x.squeeze().shape,lenticule_min = min_lenticule_width,lenticule_max = max_lenticule_width)
+        
+        if not self.args.save_only_color:
+            t_0 = time.time()
+            z_raster = reconstruct_boundaries(lenticules_location_bottom,lenticules_location_top,size=x.squeeze().shape,lenticule_min = min_lenticule_width,lenticule_max = max_lenticule_width)
+            #print("raster rec: {}".format(time.time()-t_0))
+            #t_0 = time.time()
 
-        z_raster = torch.from_numpy(z_raster).unsqueeze(0).unsqueeze(0).float().to(self.device)
+            z_raster = torch.from_numpy(z_raster).unsqueeze(0).unsqueeze(0).float().to(self.device).squeeze(0)
+        else:
+            z_raster =None
+
         x = x.to(self.device)
         
         idx_color = [5.*w/19.,9.*w/19.,14.*w/19.]
@@ -250,7 +275,8 @@ class ColorizeSuite(object):
             last = len(lenticules_location_top) - 1
             
         x_stripe = np.zeros((3,H,3*(last-first-1)))
-    
+
+        t_0 = time.time()
         for c in range(0,3):
             for n,bottom,top in zip(range(len(lenticules_location_top[first:last-1])),lenticules_location_bottom[first:last-1],lenticules_location_top[first:last-1]):
 
@@ -275,11 +301,13 @@ class ColorizeSuite(object):
                 extr_col_den = filters.median(extr_col[:,None],disk(6))
                 x_stripe[c,:,3*n+c] = torch.from_numpy(extr_col_den.squeeze()) #x_filter[idx_row,idx_col]
 
+        #print("loop time: {}".format(time.time()-t_0))
+
         x_stripe = torch.from_numpy(x_stripe).float().unsqueeze(0)
 
         x_stripe = F.interpolate(x_stripe,None,scale_factor=(3/w,1),recompute_scale_factor=True) #,mode=F.bilinear)
 
-        return x_stripe,z_raster.squeeze(0),lenticules_location_bottom,lenticules_location_top 
+        return x_stripe,z_raster,lenticules_location_bottom,lenticules_location_top 
     
 
     def destriping(self,x_stripe):
