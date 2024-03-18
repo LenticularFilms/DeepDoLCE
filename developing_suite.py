@@ -11,6 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from utils.other import new_log
 from dataloading import get_dataloaders
 from utils.plot_utils import *
+from torch.autograd import Variable
 
 if 'ipykernel' in sys.modules:
     from tqdm import tqdm_notebook as tqdm
@@ -61,6 +62,8 @@ class DevelopingSuite(object):
         self.args = args
         
         self.dataloaders, self.data_stats =  get_dataloaders(args)
+        
+        self.Tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
 
         self.device = torch.device("cuda" if torch.cuda.is_available() and args.device=="cuda" else "cpu")
         self.model = get_model(args,self.data_stats)

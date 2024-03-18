@@ -27,7 +27,7 @@ parser = argparse.ArgumentParser(description="colorizing script")
 parser.add_argument('--tag', default="__",type=str)
 parser.add_argument("--device",default="cuda",type=str,choices=["cuda", "cpu"])
 parser.add_argument("--save-dir",help="Path to directory where models and logs should be saved saved")
-parser.add_argument('--mode',default="only_train",type=str,choices=["None","train","test","train_and_test"],help="mode to be run")
+parser.add_argument('--mode',default="only_train",type=str,choices=["None","train","test","train_and_test","test_input_images"],help="mode to be run")
 parser.add_argument("--save-only-color",action='store_true',default=False,help="avoids non useful calculation if only interested in obtaining the colored output")
 
 

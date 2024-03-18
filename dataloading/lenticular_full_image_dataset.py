@@ -5,7 +5,7 @@ import torch.utils.data as torchdata
 import json
 from PIL import Image
 import os
-
+import glob
 
 def load_full_image_dataset(args,data_stats=None):
     
@@ -22,10 +22,19 @@ def load_full_image_dataset(args,data_stats=None):
 
         train_images_list = train_val_images_list[0:int(len(train_val_images_list)*args.train_val_ratio)]
         val_images_list = train_val_images_list[int(len(train_val_images_list)*args.train_val_ratio):]
+    
+    if "test_input_images" in args.mode:
+        colorize_imgs = sorted(glob.glob(os.path.join(args.datafolder + '/inputgrayIMGs', '*')))
+        test_images_list = []
+        for img in colorize_imgs:
+         test_images_list.append(img.split(os.path.sep)[-1])
 
-    if "test" in args.mode:
+    elif "test" in args.mode:
         with open(os.path.join(args.datafolder,'test_images_list.json')) as json_file:
             test_images_list = json.load(json_file)   
+            test_images_list = json.load(json_file)   
+        
+            test_images_list = json.load(json_file)
         
 
     dataloaders = {}
@@ -37,7 +46,7 @@ def load_full_image_dataset(args,data_stats=None):
         if len(val_images_list) > 0:
             dataloaders["val"]  = torchdata.DataLoader(val_set, batch_size=args.batch_size,num_workers=args.workers,shuffle=False,pin_memory=True,drop_last=True)
 
-    if "test" in args.mode:
+    elif "test" or "test_input_images" in args.mode:
         test_set = MyDataset(test_images_list,data_stats,args)
         dataloaders["test"] = torchdata.DataLoader(test_set, batch_size=args.batch_size,num_workers=args.workers,shuffle=True,drop_last=True)
         
@@ -51,6 +60,8 @@ class MyDataset(torch.utils.data.Dataset):
         self.args = args
                 
         self.transforms = transforms.Compose([transforms.ToTensor()])
+
+        # self.transforms = transforms.Compose([transforms.Resize((1024, 1024)),transforms.ToTensor()])
 
         self.data_stats = data_stats.copy()
 

@@ -1,0 +1,13 @@
+[
+    {"user" : "<random_id>", 
+        "evaluations":
+        [{
+             "id":"<image_id>",
+             "colorization_perception": 
+             {"deep_dolce" : "<good,bad>", "dolce" : "<good,bad>"},
+             "rotation_needed": "<no-idea,yes,no>",
+             "flipped":""  
+        }
+    ]
+    }
+]
